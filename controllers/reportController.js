@@ -1,6 +1,98 @@
 const { DailyReport, Transaction, DailyProduction, Item, Shop, AuditLog } = require('../models');
-const { Parser } = require('json2csv');
 const mongoose = require('mongoose');
+const PDFDocument = require('pdfkit');
+
+const formatDate = (value) => {
+  if (!value) return 'N/A';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'N/A';
+  return date.toISOString().split('T')[0];
+};
+
+const createPdfBuffer = (builder) =>
+  new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ margin: 40, size: 'A4' });
+      const chunks = [];
+      doc.on('data', (chunk) => chunks.push(chunk));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+      builder(doc);
+      doc.end();
+    } catch (error) {
+      reject(error);
+    }
+  });
+
+const ensurePageSpace = (doc, minSpace = 60) => {
+  if (doc.y > doc.page.height - minSpace) {
+    doc.addPage();
+    doc.y = 40;
+  }
+};
+
+const drawSimpleTable = (doc, headers, rows) => {
+  const startX = doc.page.margins.left;
+  const tableWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const colWidth = tableWidth / headers.length;
+  const rowHeight = 18;
+
+  const renderHeader = () => {
+    const headerY = doc.y;
+    doc.font('Helvetica-Bold').fontSize(10).fillColor('black');
+
+    headers.forEach((header, index) => {
+      doc.text(header, startX + index * colWidth, headerY + 3, {
+        width: colWidth - 8,
+        ellipsis: true,
+        lineBreak: false
+      });
+    });
+
+    doc
+      .moveTo(startX, headerY + rowHeight)
+      .lineTo(startX + tableWidth, headerY + rowHeight)
+      .strokeColor('#D1D5DB')
+      .stroke();
+
+    doc.y = headerY + rowHeight + 4;
+  };
+
+  renderHeader();
+
+  if (!rows.length) {
+    doc.font('Helvetica').fontSize(10).fillColor('#4B5563').text('No data found for selected date range.');
+    doc.fillColor('black');
+    return;
+  }
+
+  doc.font('Helvetica').fontSize(9).fillColor('black');
+  rows.forEach((row) => {
+    if (doc.y + rowHeight > doc.page.height - doc.page.margins.bottom) {
+      doc.addPage();
+      renderHeader();
+      doc.font('Helvetica').fontSize(9).fillColor('black');
+    }
+
+    const rowY = doc.y;
+
+    row.forEach((cell, index) => {
+      doc.text(String(cell ?? ''), startX + index * colWidth, rowY + 2, {
+        width: colWidth - 8,
+        ellipsis: true,
+        lineBreak: false
+      });
+    });
+
+    doc
+      .moveTo(startX, rowY + rowHeight)
+      .lineTo(startX + tableWidth, rowY + rowHeight)
+      .strokeColor('#E5E7EB')
+      .stroke();
+
+    doc.y = rowY + rowHeight;
+  });
+};
 
 // @desc    Get dashboard stats
 // @route   GET /api/reports/dashboard
@@ -387,26 +479,28 @@ exports.exportReport = async (req, res) => {
     const end = new Date(endDate);
     end.setHours(23, 59, 59, 999);
 
-    let data, fields;
+    let pdfTitle;
+    let headers;
+    let rows;
 
     if (type === 'transactions') {
       const transactions = await Transaction.find({
         date: { $gte: start, $lte: end }
       }).populate('shopId').populate('itemId');
 
-      data = transactions.map(t => ({
-        Date: t.date.toISOString().split('T')[0],
-        Shop: t.shopId ? t.shopId.name : 'N/A',
-        Item: t.itemId ? t.itemId.name : 'N/A',
-        'Items Taken': t.itemsTaken,
-        'Items Sold': t.itemsSold,
-        'Items Returned': t.itemsReturned,
-        'Items Waste': t.itemsWaste,
-        'Price Per Item': t.pricePerItem,
-        'Total Revenue': t.totalRevenue
-      }));
-
-      fields = ['Date', 'Shop', 'Item', 'Items Taken', 'Items Sold', 'Items Returned', 'Items Waste', 'Price Per Item', 'Total Revenue'];
+      pdfTitle = 'Transactions Report';
+      headers = ['Date', 'Shop', 'Item', 'Taken', 'Sold', 'Returned', 'Waste', 'Price', 'Revenue'];
+      rows = transactions.map((t) => [
+        formatDate(t.date),
+        t.shopId ? t.shopId.name : 'N/A',
+        t.itemId ? t.itemId.name : 'N/A',
+        t.itemsTaken,
+        t.itemsSold,
+        t.itemsReturned,
+        t.itemsWaste,
+        t.pricePerItem,
+        t.totalRevenue
+      ]);
     } else if (type === 'summary') {
       const summary = await Transaction.aggregate([
         {
@@ -425,16 +519,16 @@ exports.exportReport = async (req, res) => {
         { $sort: { _id: 1 } }
       ]);
 
-      data = summary.map(s => ({
-        Date: s._id,
-        'Total Taken': s.totalTaken,
-        'Total Sold': s.totalSold,
-        'Total Returned': s.totalReturned,
-        'Total Waste': s.totalWaste,
-        'Total Revenue': s.totalRevenue
-      }));
-
-      fields = ['Date', 'Total Taken', 'Total Sold', 'Total Returned', 'Total Waste', 'Total Revenue'];
+      pdfTitle = 'Summary Report';
+      headers = ['Date', 'Taken', 'Sold', 'Returned', 'Waste', 'Revenue'];
+      rows = summary.map((s) => [
+        s._id,
+        s.totalTaken,
+        s.totalSold,
+        s.totalReturned,
+        s.totalWaste,
+        s.totalRevenue
+      ]);
     } else {
       return res.status(400).json({
         success: false,
@@ -451,12 +545,20 @@ exports.exportReport = async (req, res) => {
       ipAddress: req.ip
     });
 
-    const parser = new Parser({ fields });
-    const csv = parser.parse(data);
+    const pdfBuffer = await createPdfBuffer((doc) => {
+      doc.font('Helvetica-Bold').fontSize(16).text(`Yum Yum - ${pdfTitle}`, { align: 'center' });
+      doc.moveDown(0.5);
+      doc
+        .font('Helvetica')
+        .fontSize(10)
+        .text(`Date Range: ${startDate} to ${endDate}`, { align: 'center' });
+      doc.moveDown();
+      drawSimpleTable(doc, headers, rows);
+    });
 
-    res.header('Content-Type', 'text/csv');
-    res.attachment(`report_${type}_${startDate}_to_${endDate}.csv`);
-    res.send(csv);
+    res.header('Content-Type', 'application/pdf');
+    res.attachment(`report_${type}_${startDate}_to_${endDate}.pdf`);
+    res.send(pdfBuffer);
   } catch (error) {
     console.error('Export error:', error);
     res.status(500).json({
@@ -627,25 +729,13 @@ exports.getAuditLogs = async (req, res) => {
 exports.backupData = async (req, res) => {
   try {
     const [users, shops, items, transactions, productions, reports] = await Promise.all([
-      require('../models/User').find().select('-password'),
-      Shop.find(),
-      Item.find(),
-      Transaction.find(),
-      DailyProduction.find(),
-      DailyReport.find()
+      require('../models/User').find().select('-password').lean(),
+      Shop.find().lean(),
+      Item.find().lean(),
+      Transaction.find().lean(),
+      DailyProduction.find().lean(),
+      DailyReport.find().lean()
     ]);
-
-    const backup = {
-      timestamp: new Date(),
-      data: {
-        users,
-        shops,
-        items,
-        transactions,
-        productions,
-        reports
-      }
-    };
 
     // Log action
     await AuditLog.logAction({
@@ -656,9 +746,47 @@ exports.backupData = async (req, res) => {
       ipAddress: req.ip
     });
 
-    res.header('Content-Type', 'application/json');
-    res.attachment(`backup_${new Date().toISOString().split('T')[0]}.json`);
-    res.send(JSON.stringify(backup, null, 2));
+    const backupDate = new Date().toISOString().split('T')[0];
+    const pdfBuffer = await createPdfBuffer((doc) => {
+      doc.font('Helvetica-Bold').fontSize(16).text('Yum Yum - Backup Report', { align: 'center' });
+      doc.moveDown(0.5);
+      doc.font('Helvetica').fontSize(10).text(`Generated on: ${backupDate}`, { align: 'center' });
+      doc.moveDown();
+
+      doc.font('Helvetica-Bold').fontSize(12).text('Dataset Summary');
+      doc.moveDown(0.5);
+      drawSimpleTable(
+        doc,
+        ['Collection', 'Record Count'],
+        [
+          ['Users', users.length],
+          ['Shops', shops.length],
+          ['Items', items.length],
+          ['Transactions', transactions.length],
+          ['Productions', productions.length],
+          ['Reports', reports.length]
+        ]
+      );
+
+      doc.moveDown();
+      doc.font('Helvetica-Bold').fontSize(12).text('Transactions Snapshot');
+      doc.moveDown(0.5);
+      drawSimpleTable(
+        doc,
+        ['Date', 'Shop ID', 'Item ID', 'Sold', 'Revenue'],
+        transactions.slice(0, 200).map((entry) => [
+          formatDate(entry.date),
+          String(entry.shopId || ''),
+          String(entry.itemId || ''),
+          entry.itemsSold || 0,
+          entry.totalRevenue || 0
+        ])
+      );
+    });
+
+    res.header('Content-Type', 'application/pdf');
+    res.attachment(`backup_${backupDate}.pdf`);
+    res.send(pdfBuffer);
   } catch (error) {
     res.status(500).json({
       success: false,

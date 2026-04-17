@@ -1,4 +1,10 @@
-const { Item, AuditLog, WholesaleUser, WholesaleLedgerEntry } = require('../models');
+const {
+  Item,
+  AuditLog,
+  DailyProduction,
+  WholesaleUser,
+  WholesaleLedgerEntry
+} = require('../models');
 const {
   formatCurrency,
   sendWhatsAppMessage
@@ -10,6 +16,16 @@ const toDateRangeForToday = () => {
   const end = new Date(start);
   end.setDate(end.getDate() + 1);
   return { start, end };
+};
+
+const buildStockError = (itemName, availableStock, requestedQuantity) =>
+  `Insufficient stock for ${itemName}. Available: ${availableStock}, requested: ${requestedQuantity}`;
+
+const rollbackStockAdjustments = async (stockAdjustments) => {
+  for (const adjustment of stockAdjustments) {
+    adjustment.production.currentAvailableStock = adjustment.previousStock;
+    await adjustment.production.save();
+  }
 };
 
 const generateReceiptNumber = (prefix = 'WS') => {
@@ -420,12 +436,17 @@ exports.createWholesaleSale = async (req, res) => {
     const itemIds = saleLines.map((line) => line.itemId);
     const dbItems = await Item.find({ _id: { $in: itemIds } });
     const itemsById = new Map(dbItems.map((item) => [item._id.toString(), item]));
+    const stockRequirements = new Map();
 
     const normalizedLines = saleLines.map((line) => {
       const item = itemsById.get(String(line.itemId));
       if (!item) {
         throw new Error(`Item not found for id: ${line.itemId}`);
       }
+
+      const itemKey = item._id.toString();
+      stockRequirements.set(itemKey, (stockRequirements.get(itemKey) || 0) + line.quantity);
+
       return {
         itemId: item._id,
         itemName: item.name,
@@ -435,64 +456,123 @@ exports.createWholesaleSale = async (req, res) => {
       };
     });
 
-    const totalAmount = Number(
-      normalizedLines.reduce((sum, line) => sum + line.lineTotal, 0).toFixed(2)
+    const { start, end } = toDateRangeForToday();
+    const productionRecords = await DailyProduction.find({
+      date: { $gte: start, $lt: end },
+      itemId: { $in: itemIds }
+    });
+
+    const productionByItemId = new Map(
+      productionRecords.map((production) => [production.itemId.toString(), production])
     );
 
-    const receiptNumber = await createUniqueReceiptNumber('WS');
+    const stockAdjustments = [];
 
-    const saleEntry = await WholesaleLedgerEntry.create({
-      wholesaleUserId: wholesaleUser._id,
-      entryType: 'SALE',
-      amount: totalAmount,
-      items: normalizedLines,
-      receiptNumber,
-      notes,
-      createdBy: req.user._id
-    });
+    for (const [itemId, requestedQuantity] of stockRequirements.entries()) {
+      const item = itemsById.get(itemId);
+      const production = productionByItemId.get(itemId);
 
-    const summaryAfter = await getWholesaleSummary(wholesaleUser._id);
+      if (!production) {
+        return res.status(400).json({
+          success: false,
+          message: `No production data for ${item?.name || 'this item'} today`
+        });
+      }
 
-    let whatsappResult = { sent: false, skipped: true, reason: 'NOT_ATTEMPTED' };
+      if (production.currentAvailableStock < requestedQuantity) {
+        return res.status(400).json({
+          success: false,
+          message: buildStockError(item.name, production.currentAvailableStock, requestedQuantity),
+          availableStock: production.currentAvailableStock,
+          requestedQuantity
+        });
+      }
 
-    try {
-      whatsappResult = await sendWhatsAppMessage({
-        to: wholesaleUser.phone,
-        body: createSaleWhatsAppReceiptText({ wholesaleUser, saleEntry, summaryAfter })
+      stockAdjustments.push({
+        production,
+        previousStock: production.currentAvailableStock,
+        newStock: production.currentAvailableStock - requestedQuantity
       });
-    } catch (notificationError) {
-      whatsappResult = {
-        sent: false,
-        reason: notificationError.message || 'WHATSAPP_NOTIFICATION_FAILED'
-      };
     }
 
-    await AuditLog.logAction({
-      userId: req.user._id,
-      action: 'CREATE_WHOLESALE_SALE',
-      entityType: 'WholesaleSale',
-      entityId: saleEntry._id,
-      description: `Created wholesale sale for ${wholesaleUser.name} (${saleEntry.receiptNumber})`,
-      newValue: {
-        receiptNumber: saleEntry.receiptNumber,
-        amount: saleEntry.amount,
-        itemCount: saleEntry.items.length
-      },
-      ipAddress: req.ip
-    });
-
-    res.status(201).json({
-      success: true,
-      message: 'Wholesale sale saved and receipt processed',
-      data: {
-        saleEntry,
-        summaryAfter,
-        notification: {
-          whatsapp: whatsappResult
-        }
+    try {
+      for (const adjustment of stockAdjustments) {
+        adjustment.production.currentAvailableStock = adjustment.newStock;
+        await adjustment.production.save();
       }
-    });
+
+      const totalAmount = Number(
+        normalizedLines.reduce((sum, line) => sum + line.lineTotal, 0).toFixed(2)
+      );
+
+      const receiptNumber = await createUniqueReceiptNumber('WS');
+
+      const saleEntry = await WholesaleLedgerEntry.create({
+        wholesaleUserId: wholesaleUser._id,
+        entryType: 'SALE',
+        amount: totalAmount,
+        items: normalizedLines,
+        receiptNumber,
+        notes,
+        createdBy: req.user._id
+      });
+
+      try {
+        await AuditLog.logAction({
+          userId: req.user._id,
+          action: 'CREATE_WHOLESALE_SALE',
+          entityType: 'WholesaleSale',
+          entityId: saleEntry._id,
+          description: `Created wholesale sale for ${wholesaleUser.name} (${saleEntry.receiptNumber})`,
+          newValue: {
+            receiptNumber: saleEntry.receiptNumber,
+            amount: saleEntry.amount,
+            itemCount: saleEntry.items.length
+          },
+          ipAddress: req.ip
+        });
+      } catch (auditError) {
+        console.error('Wholesale sale audit log error:', auditError);
+      }
+
+      const summaryAfter = await getWholesaleSummary(wholesaleUser._id);
+
+      let whatsappResult = { sent: false, skipped: true, reason: 'NOT_ATTEMPTED' };
+
+      try {
+        whatsappResult = await sendWhatsAppMessage({
+          to: wholesaleUser.phone,
+          body: createSaleWhatsAppReceiptText({ wholesaleUser, saleEntry, summaryAfter })
+        });
+      } catch (notificationError) {
+        whatsappResult = {
+          sent: false,
+          reason: notificationError.message || 'WHATSAPP_NOTIFICATION_FAILED'
+        };
+      }
+
+      return res.status(201).json({
+        success: true,
+        message: 'Wholesale sale saved and receipt processed',
+        data: {
+          saleEntry,
+          summaryAfter,
+          stockUpdates: stockAdjustments.map((adjustment) => ({
+            itemId: adjustment.production.itemId,
+            previousStock: adjustment.previousStock,
+            remainingStock: adjustment.newStock
+          })),
+          notification: {
+            whatsapp: whatsappResult
+          }
+        }
+      });
+    } catch (saleError) {
+      await rollbackStockAdjustments(stockAdjustments);
+      throw saleError;
+    }
   } catch (error) {
+    console.error('Error creating wholesale sale:', error);
     res.status(500).json({
       success: false,
       message: 'Error creating wholesale sale',
