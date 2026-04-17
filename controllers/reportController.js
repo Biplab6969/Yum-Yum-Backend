@@ -80,15 +80,29 @@ exports.getDashboardStats = async (req, res) => {
       }
     ]);
 
-    // Low stock alerts
+    // Item-wise stock summary for dashboard + low stock alerts
     const items = await Item.find({ isActive: true });
+    const stockByItem = [];
     const lowStockItems = [];
-    
+
     for (const item of items) {
-      const prod = todayProduction.find(p => p.itemId && p.itemId._id.toString() === item._id.toString());
+      const prod = todayProduction.find(
+        p => p.itemId && p.itemId._id.toString() === item._id.toString()
+      );
       const currentStock = prod ? prod.currentAvailableStock : 0;
-      
-      if (currentStock <= item.lowStockThreshold) {
+      const producedToday = prod ? prod.productionQuantity : 0;
+      const isLowStock = currentStock <= item.lowStockThreshold;
+
+      stockByItem.push({
+        itemId: item._id,
+        itemName: item.name,
+        remainingStock: currentStock,
+        producedToday,
+        threshold: item.lowStockThreshold,
+        isLowStock
+      });
+
+      if (isLowStock) {
         lowStockItems.push({
           itemId: item._id,
           itemName: item.name,
@@ -99,6 +113,8 @@ exports.getDashboardStats = async (req, res) => {
       }
     }
 
+    stockByItem.sort((a, b) => a.itemName.localeCompare(b.itemName));
+
     res.status(200).json({
       success: true,
       data: {
@@ -108,7 +124,8 @@ exports.getDashboardStats = async (req, res) => {
           totalSales: todaySales,
           totalRevenue: todayRevenue,
           totalWaste: todayWaste,
-          remainingStock: todayRemainingStock
+          remainingStock: todayRemainingStock,
+          stockByItem
         },
         monthly: monthlyStats.length > 0 ? {
           totalSales: monthlyStats[0].totalSales,

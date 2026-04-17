@@ -5,6 +5,8 @@ const DailyProduction = require('./DailyProduction');
 const Transaction = require('./Transaction');
 const DailyReport = require('./DailyReport');
 const AuditLog = require('./AuditLog');
+const WholesaleUser = require('./WholesaleUser');
+const WholesaleLedgerEntry = require('./WholesaleLedgerEntry');
 
 module.exports = {
   User,
@@ -13,5 +15,7 @@ module.exports = {
   DailyProduction,
   Transaction,
   DailyReport,
-  AuditLog
+  AuditLog,
+  WholesaleUser,
+  WholesaleLedgerEntry
 };

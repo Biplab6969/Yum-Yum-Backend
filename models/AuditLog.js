@@ -25,12 +25,17 @@ const auditLogSchema = new mongoose.Schema({
       'CLOSE_DAY',
       'EXPORT_REPORT',
       'BACKUP_DATA',
-      'RESTORE_DATA'
+      'RESTORE_DATA',
+      'CREATE_WHOLESALE_USER',
+      'UPDATE_WHOLESALE_USER',
+      'CREATE_WHOLESALE_SALE',
+      'RECORD_WHOLESALE_PAYMENT',
+      'SEND_WHOLESALE_REMINDERS'
     ]
   },
   entityType: {
     type: String,
-    enum: ['User', 'Shop', 'Item', 'Transaction', 'DailyProduction', 'DailyReport', 'System']
+    enum: ['User', 'Shop', 'Item', 'Transaction', 'DailyProduction', 'DailyReport', 'WholesaleUser', 'WholesaleSale', 'WholesalePayment', 'System']
   },
   entityId: {
     type: mongoose.Schema.Types.ObjectId

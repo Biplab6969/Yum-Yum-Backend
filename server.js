@@ -9,8 +9,11 @@ const {
   itemRoutes,
   productionRoutes,
   transactionRoutes,
-  reportRoutes
+  reportRoutes,
+  wholesaleRoutes
 } = require('./routes');
+const { initWholesaleReminderJob } = require('./jobs/wholesaleReminderJob');
+const { initializeWhatsAppSocket } = require('./services/wholesaleNotificationService');
 
 // Connect to database
 connectDB();
@@ -45,6 +48,7 @@ app.use('/api/items', itemRoutes);
 app.use('/api/production', productionRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/wholesale', wholesaleRoutes);
 
 // Error handling
 app.use(notFound);
@@ -64,6 +68,13 @@ const server = app.listen(PORT, () => {
   ║                                                           ║
   ╚═══════════════════════════════════════════════════════════╝
   `);
+
+  // Start scheduled pending reminder job for wholesale users.
+  initWholesaleReminderJob();
+
+  initializeWhatsAppSocket().catch((error) => {
+    console.error('WhatsApp session startup failed:', error.message);
+  });
 });
 
 // Handle unhandled promise rejections
