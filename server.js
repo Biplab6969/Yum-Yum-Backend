@@ -20,17 +20,40 @@ connectDB();
 
 const app = express();
 
+// Disable ETag generation for API responses to avoid 304 Not Modified
+app.set('etag', false);
+
 // Body parser
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Enable CORS
+// Configure CORS: allow production client URL, and allow any localhost origin during development
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? process.env.CLIENT_URL 
-    : ['http://localhost:5173', 'http://localhost:3000'],
+  origin: (origin, callback) => {
+    if (process.env.NODE_ENV === 'production') {
+      return callback(null, process.env.CLIENT_URL);
+    }
+
+    // Allow requests with no origin (e.g., curl, server-to-server)
+    if (!origin) return callback(null, true);
+
+    // Allow any localhost origin (any port) during development
+    if (/^https?:\/\/localhost(:\d+)?$/.test(origin)) {
+      return callback(null, true);
+    }
+
+    // Otherwise reject
+    return callback(new Error('Not allowed by CORS'));
+  },
   credentials: true
 }));
+
+// Prevent caching for API responses (avoid 304 with empty bodies for axios)
+app.use('/api', (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
 
 // Health check route
 app.get('/api/health', (req, res) => {

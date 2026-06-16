@@ -1,11 +1,43 @@
 const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose');
 const { User, AuditLog } = require('../models');
+const connectDB = require('../config/db');
+
+const demoUsers = [
+  { id: 'demo-admin', name: 'Admin User', email: 'admin@yumyum.com', password: 'admin123', role: 'admin', shopId: null },
+  { id: 'demo-seller-1', name: 'Seller Shop 1', email: 'seller1@yumyum.com', password: 'seller123', role: 'seller', shopId: null },
+  { id: 'demo-seller-2', name: 'Seller Shop 2', email: 'seller2@yumyum.com', password: 'seller123', role: 'seller', shopId: null },
+  { id: 'demo-seller-3', name: 'Seller Shop 3', email: 'seller3@yumyum.com', password: 'seller123', role: 'seller', shopId: null },
+  { id: 'demo-seller-4', name: 'Seller Shop 4', email: 'seller4@yumyum.com', password: 'seller123', role: 'seller', shopId: null }
+];
+
+const normalizeShopId = (shopId) => {
+  if (!shopId) {
+    return null;
+  }
+
+  if (typeof shopId === 'object' && shopId._id) {
+    return shopId._id.toString();
+  }
+
+  return shopId.toString();
+};
 
 // Generate JWT Token
-const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET, {
+const generateToken = (user) => {
+  return jwt.sign(
+    {
+      id: user._id?.toString?.() || user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      shopId: normalizeShopId(user.shopId)
+    },
+    process.env.JWT_SECRET,
+    {
     expiresIn: process.env.JWT_EXPIRE
-  });
+    }
+  );
 };
 
 // @desc    Register user (Admin only)
@@ -71,6 +103,35 @@ exports.register = async (req, res) => {
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
+    const usingDemoAuth = !connectDB.isConnected();
+
+    if (usingDemoAuth) {
+      const demoUser = demoUsers.find((user) => user.email.toLowerCase() === String(email).toLowerCase());
+
+      if (!demoUser || demoUser.password !== password) {
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid credentials'
+        });
+      }
+
+      const token = generateToken(demoUser);
+
+      return res.status(200).json({
+        success: true,
+        message: 'Login successful',
+        data: {
+          token,
+          user: {
+            id: demoUser.id,
+            name: demoUser.name,
+            email: demoUser.email,
+            role: demoUser.role,
+            shopId: demoUser.shopId
+          }
+        }
+      });
+    }
 
     // Validate input
     if (!email || !password) {
@@ -112,7 +173,7 @@ exports.login = async (req, res) => {
     await user.updateLastLogin();
 
     // Generate token
-    const token = generateToken(user._id);
+    const token = generateToken(user);
 
     // Log action
     await AuditLog.logAction({
@@ -154,6 +215,20 @@ exports.login = async (req, res) => {
 // @access  Private
 exports.getMe = async (req, res) => {
   try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          id: req.user.id,
+          name: req.user.name,
+          email: req.user.email,
+          role: req.user.role,
+          shopId: req.user.shopId || null,
+          lastLogin: req.user.lastLogin || null
+        }
+      });
+    }
+
     const user = await User.findById(req.user.id).populate('shopId');
 
     res.status(200).json({
@@ -181,6 +256,13 @@ exports.getMe = async (req, res) => {
 // @access  Private
 exports.updatePassword = async (req, res) => {
   try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        success: false,
+        message: 'Password updates require a live database connection'
+      });
+    }
+
     const { currentPassword, newPassword } = req.body;
 
     const user = await User.findById(req.user.id).select('+password');

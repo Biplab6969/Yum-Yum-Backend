@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose');
 const { User } = require('../models');
 
 // Protect routes
@@ -28,10 +29,38 @@ exports.protect = async (req, res, next) => {
       // Verify token
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
+      if (mongoose.connection.readyState !== 1) {
+        req.user = {
+          id: decoded.id,
+          _id: decoded.id,
+          name: decoded.name,
+          email: decoded.email,
+          role: decoded.role,
+          shopId: decoded.shopId || null,
+          isActive: true
+        };
+
+        return next();
+      }
+
       // Get user from token
       req.user = await User.findById(decoded.id);
 
       if (!req.user) {
+        if (decoded.name && decoded.email && decoded.role) {
+          req.user = {
+            id: decoded.id,
+            _id: decoded.id,
+            name: decoded.name,
+            email: decoded.email,
+            role: decoded.role,
+            shopId: decoded.shopId || null,
+            isActive: true
+          };
+
+          return next();
+        }
+
         return res.status(401).json({
           success: false,
           message: 'User not found'

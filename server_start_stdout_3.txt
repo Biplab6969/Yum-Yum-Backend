@@ -1,0 +1,26 @@
+
+> yumyum-server@1.0.0 start
+> node server.js
+
+
+  ╔═══════════════════════════════════════════════════════════╗
+  ║                                                           ║
+  ║   🍜 Yum Yum Food Business Management API                 ║
+  ║                                                           ║
+  ║   Server running in development mode on port 5000       ║
+  ║                                                           ║
+  ║   API URL: http://localhost:5000/api                      ║
+  ║                                                           ║
+  ╚═══════════════════════════════════════════════════════════╝
+  
+{"level":30,"time":"2026-05-25T10:56:12.536Z","pid":3952,"hostname":"Acer","class":"baileys","browser":["Windows","Chrome","10.0.22631"],"helloMsg":{"clientHello":{"ephemeral":"cu1fk+g21Q8/AQYI1E5tVH5yZcMOULeWZFTd+wnsdhE="}},"msg":"connected to WA"}
+{"level":30,"time":"2026-05-25T10:56:12.769Z","pid":3952,"hostname":"Acer","class":"baileys","node":{"username":"919583347630","passive":true,"userAgent":{"platform":"WEB","appVersion":{"primary":2,"secondary":3000,"tertiary":1035194821},"mcc":"000","mnc":"000","osVersion":"0.1","device":"Desktop","osBuildNumber":"0.1","releaseChannel":"RELEASE","localeLanguageIso6391":"en","localeCountryIso31661Alpha2":"US"},"webInfo":{"webSubPlatform":"WEB_BROWSER"},"connectType":"WIFI_UNKNOWN","connectReason":"USER_ACTIVATED","device":3,"pull":true,"lidDbMigrated":false},"msg":"logging in..."}
+{"level":30,"time":"2026-05-25T10:56:13.531Z","pid":3952,"hostname":"Acer","class":"baileys","msg":"800 pre-keys found on server"}
+{"level":30,"time":"2026-05-25T10:56:13.531Z","pid":3952,"hostname":"Acer","class":"baileys","msg":"Current prekey ID: 813, exists in storage: true"}
+{"level":30,"time":"2026-05-25T10:56:13.531Z","pid":3952,"hostname":"Acer","class":"baileys","msg":"PreKey validation passed - Server: 800, Current prekey 813 exists"}
+{"level":30,"time":"2026-05-25T10:56:13.783Z","pid":3952,"hostname":"Acer","class":"baileys","msg":"handled 0 offline messages/notifications"}
+{"level":30,"time":"2026-05-25T10:56:13.784Z","pid":3952,"hostname":"Acer","class":"baileys","msg":"Connection is now AwaitingInitialSync, buffering events"}
+{"level":30,"time":"2026-05-25T10:56:13.785Z","pid":3952,"hostname":"Acer","class":"baileys","msg":"History sync is disabled by config, not waiting for notification. Transitioning to Online."}
+{"level":30,"time":"2026-05-25T10:56:14.107Z","pid":3952,"hostname":"Acer","class":"baileys","msg":"opened connection to WA"}
+{"level":30,"time":"2026-05-25T10:56:14.130Z","pid":3952,"hostname":"Acer","class":"baileys","myPN":"919583347630:3@s.whatsapp.net","myLID":"147515517186110:3@lid","msg":"Own LID session created successfully"}
+{"level":40,"time":"2026-05-25T10:57:14.117Z","pid":3952,"hostname":"Acer","class":"baileys","msgId":"22453.21593-4","msg":"timed out waiting for message"}
